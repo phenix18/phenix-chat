@@ -12,6 +12,8 @@ import {
   getHeaders,
   LLMApi,
   LLMModel,
+  SpeechOptions,
+  TranscriptionOptions,
   MultimodalContent,
 } from "../api";
 import Locale from "../../locales";
@@ -81,6 +83,13 @@ export class QwenApi implements LLMApi {
 
   extractMessage(res: any) {
     return res?.output?.choices?.at(0)?.message?.content ?? "";
+  }
+
+  speech(options: SpeechOptions): Promise<ArrayBuffer> {
+    throw new Error("Method not implemented.");
+  }
+  transcription(options: TranscriptionOptions): Promise<string> {
+    throw new Error("Method not implemented.");
   }
 
   async chat(options: ChatOptions) {

@@ -10,11 +10,14 @@ import React, {
 } from "react";
 
 import SendWhiteIcon from "../icons/send-white.svg";
+import VoiceWhiteIcon from "../icons/voice-white.svg";
 import BrainIcon from "../icons/brain.svg";
 import RenameIcon from "../icons/rename.svg";
 import ExportIcon from "../icons/share.svg";
 import ReturnIcon from "../icons/return.svg";
 import CopyIcon from "../icons/copy.svg";
+import SpeakIcon from "../icons/speak.svg";
+import SpeakStopIcon from "../icons/speak-stop.svg";
 import LoadingIcon from "../icons/three-dots.svg";
 import LoadingButtonIcon from "../icons/loading.svg";
 import PromptIcon from "../icons/prompt.svg";
@@ -64,6 +67,7 @@ import {
   getMessageImages,
   isVisionModel,
   isDalle3,
+  isFirefox,
 } from "../utils";
 
 import { uploadImage as uploadImageRemote } from "@/app/utils/chat";
@@ -73,7 +77,7 @@ import dynamic from "next/dynamic";
 import { ChatControllerPool } from "../client/controller";
 import { DalleSize, DalleQuality, DalleStyle } from "../typing";
 import { Prompt, usePromptStore } from "../store/prompt";
-import Locale from "../locales";
+import Locale, { getLang, getSTTLang } from "../locales";
 
 import { IconButton } from "./button";
 import styles from "./chat.module.scss";
@@ -90,6 +94,10 @@ import {
 import { useNavigate } from "react-router-dom";
 import {
   CHAT_PAGE_SIZE,
+  DEFAULT_STT_ENGINE,
+  DEFAULT_TTS_ENGINE,
+  FIREFOX_DEFAULT_STT_ENGINE,
+  ModelProvider,
   LAST_INPUT_KEY,
   Path,
   REQUEST_TIMEOUT_MS,
@@ -106,6 +114,16 @@ import { ExportMessageModal } from "./exporter";
 import { getClientConfig } from "../config/client";
 import { useAllModels } from "../utils/hooks";
 import { MultimodalContent } from "../client/api";
+import { ClientApi } from "../client/api";
+import { createTTSPlayer } from "../utils/audio";
+import {
+  OpenAITranscriptionApi,
+  SpeechApi,
+  WebTranscriptionApi,
+} from "../utils/speech";
+import { MsEdgeTTS, OUTPUT_FORMAT } from "../utils/ms_edge_tts";
+
+const ttsPlayer = createTTSPlayer();
 
 const Markdown = dynamic(async () => (await import("./markdown")).Markdown, {
   loading: () => <LoadingIcon />,
@@ -435,6 +453,7 @@ export function ChatActions(props: {
   showPromptHints: () => void;
   hitBottom: boolean;
   uploading: boolean;
+  setUserInput: (input: string) => void;
 }) {
   const config = useAppConfig();
   const navigate = useNavigate();
@@ -525,6 +544,44 @@ export function ChatActions(props: {
       );
     }
   }, [chatStore, currentModel, models]);
+
+  const [isListening, setIsListening] = useState(false);
+  const [isTranscription, setIsTranscription] = useState(false);
+  const [speechApi, setSpeechApi] = useState<any>(null);
+
+  useEffect(() => {
+    if (isFirefox()) config.sttConfig.engine = FIREFOX_DEFAULT_STT_ENGINE;
+    setSpeechApi(
+      config.sttConfig.engine === DEFAULT_STT_ENGINE
+        ? new WebTranscriptionApi((transcription) =>
+            onRecognitionEnd(transcription),
+          )
+        : new OpenAITranscriptionApi((transcription) =>
+            onRecognitionEnd(transcription),
+          ),
+    );
+  }, []);
+
+  const startListening = async () => {
+    if (speechApi) {
+      await speechApi.start();
+      setIsListening(true);
+    }
+  };
+  const stopListening = async () => {
+    if (speechApi) {
+      if (config.sttConfig.engine !== DEFAULT_STT_ENGINE)
+        setIsTranscription(true);
+      await speechApi.stop();
+      setIsListening(false);
+    }
+  };
+  const onRecognitionEnd = (finalTranscript: string) => {
+    console.log(finalTranscript);
+    if (finalTranscript) props.setUserInput(finalTranscript);
+    if (config.sttConfig.engine !== DEFAULT_STT_ENGINE)
+      setIsTranscription(false);
+  };
 
   return (
     <div className={styles["chat-input-actions"]}>
@@ -748,6 +805,16 @@ export function ChatActions(props: {
               showToast(plugin);
             }
           }}
+        />
+      )}
+
+      {config.sttConfig.enable && (
+        <ChatAction
+          onClick={async () =>
+            isListening ? await stopListening() : await startListening()
+          }
+          text={isListening ? Locale.Chat.StopSpeak : Locale.Chat.StartSpeak}
+          icon={<VoiceWhiteIcon />}
         />
       )}
     </div>
@@ -1102,10 +1169,55 @@ function _Chat() {
     });
   };
 
+  const accessStore = useAccessStore();
+  const [speechStatus, setSpeechStatus] = useState(false);
+  const [speechLoading, setSpeechLoading] = useState(false);
+  async function openaiSpeech(text: string) {
+    if (speechStatus) {
+      ttsPlayer.stop();
+      setSpeechStatus(false);
+    } else {
+      var api: ClientApi;
+      api = new ClientApi(ModelProvider.GPT);
+      const config = useAppConfig.getState();
+      setSpeechLoading(true);
+      ttsPlayer.init();
+      let audioBuffer: ArrayBuffer;
+      const { markdownToTxt } = require("markdown-to-txt");
+      const textContent = markdownToTxt(text);
+      if (config.ttsConfig.engine !== DEFAULT_TTS_ENGINE) {
+        const edgeVoiceName = accessStore.edgeVoiceName();
+        const tts = new MsEdgeTTS();
+        await tts.setMetadata(
+          edgeVoiceName,
+          OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3,
+        );
+        audioBuffer = await tts.toArrayBuffer(textContent);
+      } else {
+        audioBuffer = await api.llm.speech({
+          model: config.ttsConfig.model,
+          input: textContent,
+          voice: config.ttsConfig.voice,
+          speed: config.ttsConfig.speed,
+        });
+      }
+      setSpeechStatus(true);
+      ttsPlayer
+        .play(audioBuffer, () => {
+          setSpeechStatus(false);
+        })
+        .catch((e) => {
+          console.error("[OpenAI Speech]", e);
+          showToast(prettyObject(e));
+          setSpeechStatus(false);
+        })
+        .finally(() => setSpeechLoading(false));
+    }
+  }
+
   const context: RenderMessage[] = useMemo(() => {
     return session.mask.hideContext ? [] : session.mask.context.slice();
   }, [session.mask.context, session.mask.hideContext]);
-  const accessStore = useAccessStore();
 
   if (
     context.length === 0 &&
@@ -1567,6 +1679,25 @@ function _Chat() {
                                   )
                                 }
                               />
+                              {config.ttsConfig.enable && (
+                                <ChatAction
+                                  text={
+                                    speechStatus
+                                      ? Locale.Chat.Actions.StopSpeech
+                                      : Locale.Chat.Actions.Speech
+                                  }
+                                  icon={
+                                    speechStatus ? (
+                                      <SpeakStopIcon />
+                                    ) : (
+                                      <SpeakIcon />
+                                    )
+                                  }
+                                  onClick={() =>
+                                    openaiSpeech(getMessageTextContent(message))
+                                  }
+                                />
+                              )}
                             </>
                           )}
                         </div>
@@ -1664,6 +1795,7 @@ function _Chat() {
             setUserInput("/");
             onSearch("");
           }}
+          setUserInput={setUserInput}
         />
         <label
           className={`${styles["chat-input-panel-inner"]} ${

@@ -20,6 +20,8 @@ import {
   LLMModel,
   LLMUsage,
   MultimodalContent,
+  SpeechOptions,
+  TranscriptionOptions,
 } from "../api";
 import Locale from "../../locales";
 import {
@@ -64,6 +66,13 @@ export class MoonshotApi implements LLMApi {
 
   extractMessage(res: any) {
     return res.choices?.at(0)?.message?.content ?? "";
+  }
+
+  speech(options: SpeechOptions): Promise<ArrayBuffer> {
+    throw new Error("Method not implemented.");
+  }
+  transcription(options: TranscriptionOptions): Promise<string> {
+    throw new Error("Method not implemented.");
   }
 
   async chat(options: ChatOptions) {
