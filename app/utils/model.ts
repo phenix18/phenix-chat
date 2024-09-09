@@ -37,6 +37,25 @@ const sortModelTable = (models: ReturnType<typeof collectModels>) =>
     }
   });
 
+export function parseModelName(name: string): {
+  customModelName: string;
+  customProviderName: string;
+} {
+  let customModelName = name.split("@")[0];
+  let customProviderName = name.slice(customModelName.length + 1);
+  if (name.startsWith("'") || name.startsWith('"')) {
+    const match = name.match(/^(['"])(.*?)\1(@.*)?$/);
+    if (match) {
+      customModelName = match[2];
+      customProviderName = match[3]?.slice(1) || customModelName;
+    }
+  }
+  return { customModelName, customProviderName } as {
+    customModelName: string;
+    customProviderName: string;
+  };
+}
+
 export function collectModelTable(
   models: readonly LLMModel[],
   customModels: string,
@@ -79,7 +98,12 @@ export function collectModelTable(
         );
       } else {
         // 1. find model by name, and set available value
-        const [customModelName, customProviderName] = name.split("@");
+        // modelName@azure => 'modelName', 'azure'
+        // 'modelName@azure' => 'modelName@azure', ''
+        // modelName@azure=deploymentName => 'modelName', 'azure=deploymentName'
+        // 'modelName@azure'=deploymentName => 'modelName@azure', '=deploymentName
+        // 'modelName@azure'@azure=deploymentName => 'modelName@azure', 'azure=deploymentName'
+        let { customModelName, customProviderName } = parseModelName(name);
         let count = 0;
         for (const fullName in modelTable) {
           const [modelName, providerName] = fullName.split("@");
@@ -102,7 +126,7 @@ export function collectModelTable(
         }
         // 2. if model not exists, create new model with available value
         if (count === 0) {
-          let [customModelName, customProviderName] = name.split("@");
+          let { customModelName, customProviderName } = parseModelName(name);
           const provider = customProvider(
             customProviderName || customModelName,
           );
