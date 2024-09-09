@@ -19,6 +19,7 @@ import { ErnieApi } from "./platforms/baidu";
 import { DoubaoApi } from "./platforms/bytedance";
 import { QwenApi } from "./platforms/alibaba";
 import { HunyuanApi } from "./platforms/tencent";
+import { StepfunApi } from "./platforms/stepfun";
 import { MoonshotApi } from "./platforms/moonshot";
 import { SparkApi } from "./platforms/iflytek";
 
@@ -136,6 +137,9 @@ export class ClientApi {
       case ModelProvider.Hunyuan:
         this.llm = new HunyuanApi();
         break;
+      case ModelProvider.Stepfun:
+        this.llm = new StepfunApi();
+        break;
       case ModelProvider.Moonshot:
         this.llm = new MoonshotApi();
         break;
@@ -224,6 +228,7 @@ export function getHeaders() {
     const isBaidu = modelConfig.providerName == ServiceProvider.Baidu;
     const isByteDance = modelConfig.providerName === ServiceProvider.ByteDance;
     const isAlibaba = modelConfig.providerName === ServiceProvider.Alibaba;
+    const isStepfun = modelConfig.providerName === ServiceProvider.Stepfun;
     const isMoonshot = modelConfig.providerName === ServiceProvider.Moonshot;
     const isIflytek = modelConfig.providerName === ServiceProvider.Iflytek;
     const isEnabledAccessControl = accessStore.enabledAccessControl();
@@ -237,6 +242,8 @@ export function getHeaders() {
       ? accessStore.bytedanceApiKey
       : isAlibaba
       ? accessStore.alibabaApiKey
+      : isStepfun
+      ? accessStore.stepfunApiKey
       : isMoonshot
       ? accessStore.moonshotApiKey
       : isIflytek
@@ -304,6 +311,8 @@ export function getClientApi(provider: ServiceProvider): ClientApi {
       return new ClientApi(ModelProvider.Qwen);
     case ServiceProvider.Tencent:
       return new ClientApi(ModelProvider.Hunyuan);
+    case ServiceProvider.Stepfun:
+      return new ClientApi(ModelProvider.Stepfun);
     case ServiceProvider.Moonshot:
       return new ClientApi(ModelProvider.Moonshot);
     case ServiceProvider.Iflytek:
